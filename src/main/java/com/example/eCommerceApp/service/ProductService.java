@@ -212,7 +212,6 @@ public class ProductService {
             }
         }
 
-        productAttributeValueMapRepository.deleteAllByProductTemplateId(productTemplateId);
         if (attributeIds.size() != attributeInputs.size()) {
             attributeValueRepository.deleteAllByIdInAndIsOfShop(attributeValueIds, Boolean.TRUE);
             for (Long attributeId : attributeIdList) {
@@ -298,6 +297,29 @@ public class ProductService {
     }
 
     @Transactional
+    public void updateProductsAfterChangeAttribute(String accessToken,List<ProductInput> productInputs, Long productTemplateId) {
+        Long shopId = TokenHelper.getUserIdFromToken(accessToken);
+        ProductTemplateEntity productTemplateEntity = customRepository.getProductTemplateBy(productTemplateId);
+        UserEntity shopEntity = customRepository.getUserBy(shopId);
+        if(Boolean.FALSE.equals(shopEntity.getIsShop())) {
+            throw new RuntimeException(Common.ACTION_FAIL);
+        }
+
+        if(!shopId.equals(productTemplateEntity.getShopId())) {
+            throw new RuntimeException(Common.ACTION_FAIL);
+        }
+
+        List<Long> productIds = productRepository.findAllByProductTemplateId(productTemplateId)
+                .stream().map(ProductEntity::getId).collect(Collectors.toList());
+
+        templateAttributeMapRepository.deleteAllByProductTemplateId(productTemplateId);
+        productAttributeValueMapRepository.deleteAllByProductTemplateId(productTemplateId);
+        productRepository.deleteAllByProductTemplateId(productTemplateId);
+        shoppingCartRepository.deleteAllByProductIdIn(productIds);
+        addProducts(productInputs, productTemplateEntity);
+    }
+
+    @Transactional
     public void updateProducts(String accessToken,List<ProductInput> productInputs, Long productTemplateId) {
         Long shopId = TokenHelper.getUserIdFromToken(accessToken);
         ProductTemplateEntity productTemplateEntity = customRepository.getProductTemplateBy(productTemplateId);
@@ -310,8 +332,6 @@ public class ProductService {
             throw new RuntimeException(Common.ACTION_FAIL);
         }
 
-        templateAttributeMapRepository.deleteAllByProductTemplateId(productTemplateId);
-
         List<ProductEntity> productEntities = productRepository.findAllByProductTemplateId(productTemplateId);
 
         Map<Long, ProductEntity> productEntityMap = productEntities
@@ -319,76 +339,24 @@ public class ProductService {
 
         List<Long> productIds = productEntities.stream().map(ProductEntity::getId).collect(Collectors.toList());
 
-        Set<Long> attributeSize = productAttributeValueMapRepository.findAllByProductTemplateId(productTemplateId)
-                .stream().map(ProductAttributeValueMapEntity::getAttributeId).collect(Collectors.toSet());
-
-        if(productInputs.get(0).getAttributeValueIds().size() != attributeSize.size()) {
-            productRepository.deleteAllByProductTemplateId(productTemplateId);
-            shoppingCartRepository.deleteAllByProductIdIn(productIds);
-            addProducts(productInputs, productTemplateEntity);
-        } else {
-            Set<Long> attributeValueIds = productInputs.stream()
-                    .flatMap(productInput -> productInput.getAttributeValueIds().stream())
-                    .collect(Collectors.toSet());
-
-            Map<Long, Long> attributeValueIdMap = attributeValueRepository.findAllByIdIn(attributeValueIds)
-                    .stream().collect(Collectors.toMap(AttributeValueEntity::getId, AttributeValueEntity::getAttributeId));
-
-            Map<Long, List<ShoppingCartEntity>> shoppingCartEntityMap = shoppingCartRepository.findAllByProductIdIn(productIds)
-                    .stream().collect(Collectors.groupingBy(ShoppingCartEntity::getProductId));
-            for(ProductInput productInput : productInputs) {
-                if (productInput.getPrice() < productTemplateEntity.getMinPrice() ||
-                        productInput.getPrice() > productTemplateEntity.getMaxPrice()) {
-                    throw new RuntimeException(Common.ACTION_FAIL);
-                }
-                if(productInput.getExisted().equals(Boolean.FALSE)) {
-                    ProductEntity productEntity = ProductEntity.builder()
-                            .productTemplateId(productTemplateId)
-                            .name(productInput.getName())
-                            .price(productInput.getPrice())
-                            .imageUrl(productInput.getImageUrl())
-                            .quantity(productInput.getQuantity())
-                            .build();
-                    productRepository.save(productEntity);
-                    for (Long attributeValueId : attributeValueIds) {
-                        ProductAttributeValueMapEntity productAttributeValueMapEntity = ProductAttributeValueMapEntity.builder()
-                                .productTemplateId(productTemplateId)
-                                .attributeValueId(attributeValueId)
-                                .attributeId(attributeValueIdMap.get(attributeValueId))
-                                .productId(productEntity.getId())
-                                .build();
-                        productAttributeValueMapRepository.save(productAttributeValueMapEntity);
-                    }
-
-                } else {
-                    ProductEntity productEntity = productEntityMap.get(productInput.getProductId());
-                    productMapper.updateEntityFormInput(productEntity,productInput);
-                    productRepository.save(productEntity);
-                    for (Long attributeValueId : attributeValueIds) {
-                        ProductAttributeValueMapEntity productAttributeValueMapEntity = ProductAttributeValueMapEntity.builder()
-                                .productTemplateId(productTemplateId)
-                                .attributeValueId(attributeValueId)
-                                .attributeId(attributeValueIdMap.get(attributeValueId))
-                                .productId(productEntity.getId())
-                                .build();
-                        productAttributeValueMapRepository.save(productAttributeValueMapEntity);
-                    }
-                    productIds.remove(productInput.getProductId());
-                }
+        Map<Long, List<ShoppingCartEntity>> shoppingCartEntityMap = shoppingCartRepository.findAllByProductIdIn(productIds)
+                .stream().collect(Collectors.groupingBy(ShoppingCartEntity::getProductId));
+        for(ProductInput productInput : productInputs) {
+            if (productInput.getPrice() < productTemplateEntity.getMinPrice() ||
+                    productInput.getPrice() > productTemplateEntity.getMaxPrice()) {
+                throw new RuntimeException(Common.ACTION_FAIL);
             }
-            if(!productIds.isEmpty()) {
-                productRepository.deleteAllByIdIn(productIds);
-                shoppingCartRepository.deleteAllByProductIdIn(productIds);
-            }
+            ProductEntity productEntity = productEntityMap.get(productInput.getProductId());
+            productMapper.updateEntityFormInput(productEntity,productInput);
+            productRepository.save(productEntity);
 
-            for(ProductInput productInput : productInputs) {
-                List<ShoppingCartEntity> shoppingCartEntityList = shoppingCartEntityMap.get(productInput.getProductId());
-                if(Objects.nonNull(shoppingCartEntityList)) {
-                    for(ShoppingCartEntity shoppingCartEntity : shoppingCartEntityList) {
-                        shoppingCartEntity.setPrice(productInput.getPrice());
-                        shoppingCartEntity.setTotalPrice(productInput.getPrice() * shoppingCartEntity.getQuantity());
-                        shoppingCartRepository.save(shoppingCartEntity);
-                    }
+            List<ShoppingCartEntity> shoppingCartEntityList = shoppingCartEntityMap.get(productInput.getProductId());
+            if(Objects.nonNull(shoppingCartEntityList)) {
+                for(ShoppingCartEntity shoppingCartEntity : shoppingCartEntityList) {
+                    shoppingCartEntity.setPrice(productInput.getPrice());
+                    shoppingCartEntity.setTotalPrice(productInput.getPrice() * shoppingCartEntity.getQuantity());
+                    shoppingCartEntity.setNameProduct(productInput.getName());
+                    shoppingCartRepository.save(shoppingCartEntity);
                 }
             }
         }
@@ -658,6 +626,19 @@ public class ProductService {
         if(Boolean.FALSE.equals(shopEntity.getIsShop())) {
             throw new RuntimeException(Common.ACTION_FAIL);
         }
+
+        List<ProductAttributeValueMapEntity> productAttributeValueMapEntities =
+                productAttributeValueMapRepository.findAllByProductTemplateId(productTemplateId);
+
+        Set<Long> attributeIds = productAttributeValueMapEntities.stream()
+                        .map(ProductAttributeValueMapEntity::getAttributeId).collect(Collectors.toSet());
+
+        attributeRepository.deleteAllByIdInAndIsOfShop(attributeIds, Boolean.TRUE);
+
+        Set<Long> attributeValueIds = productAttributeValueMapEntities
+                .stream().map(ProductAttributeValueMapEntity::getAttributeValueId).collect(Collectors.toSet());
+
+        attributeValueRepository.deleteAllByIdInAndIsOfShop(attributeValueIds, Boolean.TRUE);
 
         productTemplateRepository.deleteById(productTemplateId);
         productRepository.deleteAllByProductTemplateId(productTemplateId);

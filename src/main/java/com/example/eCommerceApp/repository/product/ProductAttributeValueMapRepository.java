@@ -21,4 +21,6 @@ public interface ProductAttributeValueMapRepository extends JpaRepository<Produc
 
     void deleteAllByProductIdIn(List<Long> productIds);
 
+    List<ProductAttributeValueMapEntity> findAllByProductId(Long productId);
+
 }

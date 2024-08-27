@@ -49,6 +49,14 @@ public class ProductController {
         productService.updateAttributeAndAttributeValue(accessToken, productTemplateId, attributeInputs);
     }
 
+    @Operation(summary = "Thay đổi sản phẩm sau khi thay đổi attribute và attributeValue")
+    @PostMapping("/change-product")
+    public void updateProductsAfterChangeAttribute(@RequestHeader("Authorization") String accessToken,
+                                                   @RequestBody List<ProductInput> productInputs,
+                                                   @RequestParam Long productTemplateId) {
+        productService.updateProductsAfterChangeAttribute(accessToken,productInputs,productTemplateId);
+    }
+
     @Operation(summary = "Thay đổi thông tin sản phẩm con")
     @PostMapping("/update")
     public void updateProducts(@RequestHeader("Authorization") String accessToken,

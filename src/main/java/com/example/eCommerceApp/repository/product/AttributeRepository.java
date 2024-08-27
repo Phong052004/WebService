@@ -12,4 +12,6 @@ public interface AttributeRepository extends JpaRepository<AttributeEntity,Long>
     List<AttributeEntity> findAllByIsOfShop(Boolean False);
 
     List<AttributeEntity> findAllByIdIn(Set<Long> attributeIds);
+
+    void deleteAllByIdInAndIsOfShop(Set<Long> attributeIds, Boolean True);
 }
